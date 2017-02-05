@@ -1,0 +1,23 @@
+#!/usr/bin/env ruby
+
+require 'csv'
+require 'json'
+
+require 'pp'
+
+ingredients = File.expand_path("../../csv/ingredients.csv", __FILE__)
+mapping = CSV.read(ingredients, headers: true).map { |row|
+  ans = row.to_h.map { |k, v|
+    key = k.downcase.gsub(/\W+/, '_')
+    value = v.gsub(/\W+$/, '')
+    value = value.downcase.gsub(/\s+/, '-') unless %w{weight value obtained}.include?(key)
+    [key, value]
+  }.to_h
+
+  ans[:dlc] = !(row["Ingredient"] =~ /\W+$/).nil?
+  ans
+}
+
+File.open(File.expand_path("../../json/ingredients.json", __FILE__), File::RDWR | File::CREAT | File::TRUNC) do |f|
+  f << JSON.pretty_generate(mapping)
+end

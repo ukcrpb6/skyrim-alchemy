@@ -1,0 +1,99 @@
+#!/usr/bin/env ruby
+
+# require 'csv'
+require 'json'
+require 'pp'
+require 'set'
+
+@ingredients = Hash.new
+json = JSON.parse(File.read(File.expand_path("../../json/ingredients.json", __FILE__)))
+json.each do |ingredient|
+  ingredient = ingredient.map { |k, v| [k.to_sym, v]}.to_h
+  @ingredients[ingredient[:ingredient]] = ingredient unless ingredient[:dlc]
+end
+
+@ingredients.delete("berit's-ashes(identical-to-bone-meal")
+
+@effects = Hash.new
+@ingredients.each do |name, ingredient|
+  [:primary_effect, :secondary_effect, :tertiary_effect, :quaternary_effect].each do |key|
+    (@effects[ingredient[key]] ||= []) << ingredient[:ingredient]
+  end
+end
+
+def effects(name)
+  [:primary_effect, :secondary_effect, :tertiary_effect, :quaternary_effect].map { |key| @ingredients[name][key] }.to_set
+end
+
+def rank(ingredients, effects)
+  effects.inject(0) { |acc, e|
+    ingredients.inject(acc) { |i_acc, i|
+      if @recorded_effects[i].include?(e)
+        i_acc
+      else
+        i_acc + 1
+      end
+    }
+  }
+end
+
+def find_best_reaction(key, ingredient, found_effects)
+  name = ingredient[:ingredient]
+  effect = ingredient[key]
+
+  if found_effects.include?(effect)
+    return nil
+  end
+
+  reagents = @effects[effect] - [name]
+  permutations = reagents.permutation(2).map { |p| p + [name]}
+
+  rank = 0
+  result = nil
+  permutations.each { |p|
+    perms = p.permutation(2).map { |pair|
+      pair.map { |reagent| effects(reagent) }.reduce(:&)
+    }.reduce(:+).to_a
+
+    our_rank = rank(p, perms)
+    if our_rank > rank
+      result = {
+        ingredients: p,
+        effects: perms
+      }
+      rank = our_rank
+    end
+  }
+  result
+end
+
+@reactions = Hash.new
+@recorded_effects = Hash.new
+
+@ingredients.each { |name, ingredient| @recorded_effects[name] = Set.new }
+
+count = 0
+@ingredients.each do |name, ingredient|
+  [:primary_effect, :secondary_effect, :tertiary_effect, :quaternary_effect].each do |key|
+    reaction = find_best_reaction(key, ingredient, @recorded_effects[name])
+    if reaction
+      reaction[:ingredients].each do |reagent|
+        @recorded_effects[reagent] += effects(reagent).to_set & reaction[:effects].to_set
+      end
+      count += 1
+      unless @reactions[name]
+        @reactions[name] = { obtained: @ingredients[name][:obtained], concoctions: [] }
+      end
+      @reactions[name][:concoctions] << {
+        effect: reaction[:effects],
+        ingredients: reaction[:ingredients].sort
+      }
+    end
+  end
+end
+
+puts "Found #{count} necessary reactions"
+
+File.open(File.expand_path("../../json/concoctions.json", __FILE__), File::CREAT | File::TRUNC | File::RDWR) do |f|
+  f << JSON.pretty_generate(@reactions)
+end
